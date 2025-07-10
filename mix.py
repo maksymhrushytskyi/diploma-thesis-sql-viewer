@@ -1,7 +1,24 @@
+"""
+SQLite Database Viewer with AI Integration all
+=========================================
+
+This application provides a graphical interface for working with SQLite databases.
+Features:
+- Database selection and table management
+- SQL query execution with AI support
+- Voice input for queries
+- History and favorites management
+- Export to PDF
+- User authentication and permissions
+
+Main components:
+- LoginDialog: User authentication
+- SQLApp: Main application interface
+"""
+
 import sys
 import sqlite3
 import os
-import json
 import speech_recognition as sr
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QPushButton, QTableWidget, 
@@ -15,17 +32,6 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from g4f.client import Client
 from reportlab.lib import colors
-from docx import Document
-from docx.shared import Pt
-from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment
-try:
-    from PyQt6.QtCharts import QChart, QChartView, QBarSeries, QBarSet, QValueAxis, QPieSeries, QLineSeries
-    from PyQt6.QtCore import QPointF
-    from PyQt6.QtGui import QPainter
-    HAS_QTCHARTS = True
-except ModuleNotFoundError:
-    HAS_QTCHARTS = False
 
 # Реєструємо шрифт Arial та Arial-Bold
 pdfmetrics.registerFont(TTFont("Arial", "C:/Windows/Fonts/arial.ttf"))
@@ -117,9 +123,7 @@ class SQLApp(QWidget):
         self.db_path = os.path.join(os.path.dirname(__file__), "project_management.db")
         self.pdf_export_path = os.path.expanduser("~/Documents")
         self.history = []
-        self.favorites = []  # Change this to a dictionary to store both name and query
-        self.favorites_data = {}  # Will store queries with their names as keys
-        self.history_file = f"user_history_{self.user_id}.json" if self.user_id else "guest_history.json"
+        self.favorites = []
         
         # === UI initialization ===
         # Create main horizontal splitter
@@ -133,20 +137,6 @@ class SQLApp(QWidget):
         # History section
         history_group = QGroupBox("Історія запитів")
         history_layout = QVBoxLayout()
-        
-        # Add a layout for the history header with clear button
-        history_header_layout = QHBoxLayout()
-        history_header_label = QLabel("Історія")
-        history_header_layout.addWidget(history_header_label)
-        
-        # Add clear history button
-        self.clear_history_button = QPushButton("🗑️")
-        self.clear_history_button.setToolTip("Очистити історію")
-        self.clear_history_button.clicked.connect(self.clear_history)
-        history_header_layout.addWidget(self.clear_history_button)
-        
-        history_layout.addLayout(history_header_layout)
-        
         self.history_list = QListWidget()
         self.history_list.itemClicked.connect(self.load_from_history)
         history_layout.addWidget(self.history_list)
@@ -156,20 +146,6 @@ class SQLApp(QWidget):
         # Favorites section
         favorites_group = QGroupBox("Закріплені запити")
         favorites_layout = QVBoxLayout()
-
-        # Add a layout for the favorites header with delete button
-        favorites_header_layout = QHBoxLayout()
-        favorites_header_label = QLabel("Закріплені")
-        favorites_header_layout.addWidget(favorites_header_label)
-
-        # Add delete favorite button
-        self.delete_favorite_button = QPushButton("🗑️")
-        self.delete_favorite_button.setToolTip("Видалити закріплений запит")
-        self.delete_favorite_button.clicked.connect(self.delete_favorite)
-        favorites_header_layout.addWidget(self.delete_favorite_button)
-
-        favorites_layout.addLayout(favorites_header_layout)
-
         self.favorites_list = QListWidget()
         self.favorites_list.itemClicked.connect(self.load_from_favorites)
         favorites_layout.addWidget(self.favorites_list)
@@ -268,24 +244,15 @@ class SQLApp(QWidget):
         # Додаємо меню налаштувань та експорту
         settings_layout = QHBoxLayout()
 
+  
+
         # Кнопка експорту в PDF
         self.export_pdf_button = QPushButton("📄 Експорт у PDF")
         self.export_pdf_button.setToolTip("Зберегти поточні результати у PDF файл")
         self.export_pdf_button.clicked.connect(self.export_to_pdf)
         settings_layout.addWidget(self.export_pdf_button)
 
-        # Кнопка експорту у Word
-        self.export_word_button = QPushButton("📝 Експорт у Word")
-        self.export_word_button.setToolTip("Зберегти поточні результати у DOCX файл")
-        self.export_word_button.clicked.connect(self.export_to_word)
-        settings_layout.addWidget(self.export_word_button)
-
-        # Кнопка експорту у Excel
-        self.export_excel_button = QPushButton("📊 Експорт у Excel")
-        self.export_excel_button.setToolTip("Зберегти поточні результати у XLSX файл")
-        self.export_excel_button.clicked.connect(self.export_to_excel)
-        settings_layout.addWidget(self.export_excel_button)
-
+        # Додаємо це меню налаштувань перед таблицею
         layout.addLayout(settings_layout)
         
         # Таблиця для виводу результатів
@@ -383,62 +350,50 @@ class SQLApp(QWidget):
             # Очистити старі і завантажити нові
             self.favorites_list.clear()
             self.favorites = []
-            self.favorites_data = {}  # Reset the dictionary
             
             for query, name in favorites:
-                # Use name as display text, or truncated query if no name
                 display_text = name if name else query[:50] + ("..." if len(query) > 50 else "")
-                self.favorites.append(display_text)  # Store display text for UI
-                self.favorites_data[display_text] = query  # Store full query with display text as key
+                self.favorites.append(query)
                 self.favorites_list.addItem(display_text)
                 
         except Exception as e:
             print(f"Помилка завантаження закріплених запитів: {e}")
-
+    
     def load_user_history(self):
-        """Завантаження історії запитів користувача з JSON файлу"""
+        """Завантаження історії запитів користувача"""
+        if not self.user_id:
+            return
+            
         try:
-            history_path = os.path.join(os.path.dirname(__file__), self.history_file)
-            if os.path.exists(history_path):
-                with open(history_path, 'r', encoding='utf-8') as f:
-                    self.history = json.load(f)
-            else:
-                self.history = []
-                
+            conn = sqlite3.connect("user_management.db")
+            cursor = conn.cursor()
+            
+            # Створити таблицю, якщо вона не існує
+            cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_history (
+                history_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                query TEXT NOT NULL,
+                executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(user_id)
+            )''')
+            
+            cursor.execute("SELECT query FROM user_history WHERE user_id=? ORDER BY executed_at DESC LIMIT 50", 
+                         (self.user_id,))
+            history_items = cursor.fetchall()
+            conn.close()
+            
             # Очистити старі і завантажити нові
             self.history_list.clear()
+            self.history = []
             
-            for query in self.history:
+            for item in history_items:
+                query = item[0]
+                self.history.append(query)
                 self.history_list.addItem(query[:50] + ("..." if len(query) > 50 else ""))
                 
         except Exception as e:
             print(f"Помилка завантаження історії запитів: {e}")
-            self.history = []
-
-    def save_history_to_json(self):
-        """Збереження історії запитів у JSON файл"""
-        try:
-            history_path = os.path.join(os.path.dirname(__file__), self.history_file)
-            with open(history_path, 'w', encoding='utf-8') as f:
-                json.dump(self.history, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f"Помилка збереження історії запитів: {e}")
-
-    def clear_history(self):
-        """Очищення історії запитів"""
-        from PyQt6.QtWidgets import QMessageBox
-        
-        reply = QMessageBox.question(self, 'Підтвердження',
-                                     'Ви впевнені, що хочете очистити всю історію?',
-                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, 
-                                     QMessageBox.StandardButton.No)
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            # Очистити список та збережену історію
-            self.history_list.clear()
-            self.history = []
-            self.save_history_to_json()
-            QMessageBox.information(self, "Інформація", "Історію успішно очищено")
 
     def save_user_preferences(self):
         """Збереження налаштувань користувача"""
@@ -516,20 +471,6 @@ class SQLApp(QWidget):
         self.query_input.setText(query)
         self.execute_query()
 
-    def load_database_tables(self):
-        """Завантаження таблиць з поточної бази даних"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-            tables = cursor.fetchall()
-            conn.close()
-            
-            # Update the table buttons UI
-            self.update_table_buttons(tables)
-        except Exception as e:
-            print(f"Помилка при завантаженні таблиць: {e}")
-
     def execute_query(self):
         query = self.query_input.text()
         if not query:
@@ -542,19 +483,22 @@ class SQLApp(QWidget):
                               "У вас немає прав на виконання цього запиту")
             return
         
-        # Додавання запиту в історію (змінено для JSON)
+        # Додавання запиту в історію
         if query not in self.history:
-            self.history.insert(0, query)  # Додаємо на початок для хронологічного порядку
-            if len(self.history) > 50:  # Обмежуємо кількість записів
-                self.history = self.history[:50]
-                
-            # Оновлюємо UI
-            self.history_list.clear()
-            for q in self.history:
-                self.history_list.addItem(q[:50] + ("..." if len(q) > 50 else ""))
-                
-            # Зберігаємо історію в JSON
-            self.save_history_to_json()
+            self.history.append(query)
+            self.history_list.addItem(query[:50] + ("..." if len(query) > 50 else ""))
+            
+            # Збереження у базу даних
+            if self.user_id:
+                try:
+                    conn = sqlite3.connect("user_management.db")
+                    cursor = conn.cursor()
+                    cursor.execute("INSERT INTO user_history (user_id, query) VALUES (?, ?)",
+                                 (self.user_id, query))
+                    conn.commit()
+                    conn.close()
+                except Exception as e:
+                    print(f"Помилка збереження історії запитів: {e}")
         
         # Split the query into multiple statements
         queries = [q.strip() for q in query.split(';') if q.strip()]
@@ -724,196 +668,106 @@ class SQLApp(QWidget):
             self.query_input.setText(f"Помилка: {str(e)}")
 
     def ai_query(self):
+        # 1) Connect and gather table info
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tables = cursor.fetchall()
+        schemas = {}
+        for table in tables:
+            table_name = table[0]
+            cursor.execute(f"PRAGMA table_info({table_name})")
+            columns = cursor.fetchall()
+            schemas[table_name] = columns
+        conn.close()
+
+        # 2) Generate query from g4f (same logic as console)
         query_text = self.query_input.text()
-        
-        # First validate the query
-        is_valid, message = self.validate_ai_query(query_text)
-        if not is_valid:
-            from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "Валідація запиту", message)
+        if query_text.lower() == "exit":
             return
-        
-        # If valid, proceed with the regular AI query processing
-        try:
-            # 1) Connect and gather table info
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-            tables = cursor.fetchall()
-            schemas = {}
-            for table in tables:
-                table_name = table[0]
-                cursor.execute(f"PRAGMA table_info({table_name})")
-                columns = cursor.fetchall()
-                schemas[table_name] = columns
-            conn.close()
+        sql_query = self.try_mysql(tables, schemas, query_text)
+        print("Generated SQL:", sql_query)
 
-            # 2) Generate query from g4f
-            if query_text.lower() == "exit":
-                return
-            
-            # Show that processing is happening
-            original_text = query_text
-            self.query_input.setText("Генерую запит...")
-            QApplication.processEvents()  # Update UI immediately
-            
-            # Process with updated mysql function
-            sql_query = self.try_mysql(tables, schemas, query_text)
-            print("Generated SQL:", sql_query)
+        # 3) Execute and update table
+        self.query_input.setText(sql_query)
+        self.execute_query()
 
-            # 3) Execute and update table
-            self.query_input.setText(sql_query)
-            self.execute_query()
-            
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.critical(self, "Помилка ШІ", f"Помилка при генерації запиту: {str(e)}")
-            self.query_input.setText(original_text)  # Restore original query
-
-    def validate_ai_query(self, query_text):
-        """Validate if a query is suitable for AI processing"""
-        if not query_text or len(query_text.strip()) < 3:
-            return False, "Запит занадто короткий. Будь ласка, введіть більш детальний запит."
+    def try_mysql(self, tables, schemas, query):
+        """
+        Викликає g4f для генерації SQL-запиту на основі опису схеми БД.
+        """
+        # Extract actual table names first
+        actual_table_names = [table[0] for table in tables]
+        print("Actual tables found:", actual_table_names)
         
-        # Basic keyword check for SQL commands
-        sql_keywords = ["select", "insert", "update", "delete", "create", "alter", "drop"]
-        has_sql_command = any(keyword in query_text.lower() for keyword in sql_keywords)
-        
-        # If it's already a SQL command, we can use it directly
-        if has_sql_command:
-            return True, "SQL запит"
-        
-        # Check if it's likely a natural language query about data
-        data_question_keywords = ["хто", "що", "де", "коли", "скільки", "як", "чому", "покажи", "знайди", "список", 
-                                 "виведи", "дані", "інформація", "таблиця", "запис", "рядок"]
-        has_question_indicators = any(keyword in query_text.lower() for keyword in data_question_keywords)
-        
-        if has_question_indicators:
-            return True, "Запит природною мовою"
-        
-        # If it's very short and doesn't look like a question, validate with AI
-        try:
-            client = Client()
-            response = client.chat.completions.create(
-                model="gpt-4",  # Using a smaller model for quick validation
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "Ти — програма, яка перевіряє чи є текст запитом до бази даних. " +
-                                  "Якщо текст схожий на питання про дані або запит інформації — відповідай 'QUERY'. " +
-                                  "Якщо це привітання, розмова або текст не пов'язаний з даними — відповідай 'NOT_QUERY'. " +
-                                  "Відповідай лише одним словом: 'QUERY' або 'NOT_QUERY'."
-                    },
-                    {
-                        "role": "user",
-                        "content": query_text
+        # Отримаємо доступні права користувача
+        user_permissions = {}
+        if self.user_id and self.user_role != "admin":
+            try:
+                conn = sqlite3.connect("user_management.db")
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT table_name, can_select, can_insert, can_update, can_delete 
+                    FROM user_permissions WHERE user_id=?
+                """, (self.user_id,))
+                for row in cursor.fetchall():
+                    table, can_select, can_insert, can_update, can_delete = row
+                    user_permissions[table] = {
+                        "select": bool(can_select),
+                        "insert": bool(can_insert),
+                        "update": bool(can_update),
+                        "delete": bool(can_delete)
                     }
-                ],
-                web_search=False
-            )
-            validation = response.choices[0].message.content.strip().upper()
-            
-            if "QUERY" in validation:
-                return True, "Запит підтверджено ШІ"
-            else:
-                return False, "Ваш текст не схожий на запит до бази даних. Будь ласка, сформулюйте конкретний запит щодо даних."
-                
-        except Exception as e:
-            print(f"Помилка валідації: {e}")
-            # If validation fails, assume it's valid to avoid blocking legitimate queries
-            return True, "Помилка перевірки запиту, продовжуємо виконання"
-
-    def try_mysql(self, tables, schemas, query_text):
-        """Generate SQL from natural language using AI."""
-        try:
-            # Prepare schema information for the AI
-            db_schema = []
-            for table in tables:
-                table_name = table[0]
-                if table_name == "sqlite_sequence":  # Skip system tables
-                    continue
-                    
-                columns_info = []
-                for col in schemas[table_name]:
-                    # Format: (id, name, type, notnull, default_value, primary_key)
-                    col_id, col_name, col_type, not_null, default_val, is_pk = col
-                    col_desc = f"{col_name} ({col_type})"
-                    if is_pk:
-                        col_desc += " PRIMARY KEY"
-                    columns_info.append(col_desc)
-                    
-                db_schema.append(f"Table: {table_name}\nColumns: {', '.join(columns_info)}")
-            
-            # Join all schema information
-            schema_text = "\n\n".join(db_schema)
-            
-            # Check if schema is empty and handle it
-            if not db_schema:
-                return "SELECT 'No tables found in the database'"
-            
-            # Set up the prompt for the AI
-            prompt = f"""Ти — програма, яка перетворює запити природною мовою на SQL-запити.
-
-1. Виводь тільки чистий SQL-запит, без пояснень, лапок, форматування чи стилізації.
-2. Якщо в запиті просять знайти щось за назвою або ім'ям — шукай як латиницею, так і кирилицею (використовуй LIKE і '%текст%', SQLite не підтримує ILIKE).
-3. Твоя відповідь — лише один SQL-запит. Нічого більше.
-
-СХЕМА БАЗИ ДАНИХ:
-{schema_text}
-
-ЗАПИТ КОРИСТУВАЧА: {query_text}
-
-Поверни лише SQL-запит без додаткового тексту."""
-            
-            # Use g4f to generate SQL
-            client = Client()
-            response = client.chat.completions.create(
-                model="gpt-4",  # Using a more powerful model for SQL generation
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are an expert SQL developer. Generate only SQL queries without explanations or additional text."
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                web_search=False
-            )
-            
-            # Verify response is valid before accessing
-            if not hasattr(response, 'choices') or not response.choices:
-                debug_print("AI returned empty choices list")
-                return "SELECT 'Error: AI returned empty response'"
-            
-            # Extract the SQL query from the response
-            sql_query = response.choices[0].message.content.strip()
-            
-            # Basic cleaning of the response (remove markdown code blocks if present)
-            if sql_query.startswith("```sql"):
-                sql_query = sql_query[6:]
-            if sql_query.startswith("```"):
-                sql_query = sql_query[3:]
-            if sql_query.endswith("```"):
-                sql_query = sql_query[:-3]
-                
-            # Final cleanup
-            sql_query = sql_query.strip()
-            
-            if not sql_query:
-                return "SELECT 'Error: AI generated empty SQL query'"
-            
-            return sql_query
-            
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            debug_print(f"Error in try_mysql: {str(e)}")
-            # Fixed quote escaping with triple quotes
-            return f"""SELECT 'Error generating SQL: {str(e).replace("'", "''")}'"""
+                conn.close()
+            except Exception as e:
+                print(f"Помилка отримання прав доступу: {e}")
+        
+        # Додамо дефолтні права для таблиць, яких немає в налаштуваннях
+        for table in actual_table_names:
+            if table not in user_permissions:
+                # За замовчуванням: лише select=True
+                user_permissions[table] = {
+                    "select": True,
+                    "insert": self.user_role == "admin", 
+                    "update": self.user_role == "admin", 
+                    "delete": self.user_role == "admin"
+                }
+        
+        client = Client()
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": f"Ти — SQL-генератор. Виводь тільки працюючий SQL без пояснень, без маркування коду і зайвих атрибутів. "
+                               f"НЕ ВИКОРИСТОВУЙ МАРКЕРИ ```sql або ``` в твоїй відповіді. "
+                               f"ВАЖЛИВО: використовуй ЛИШЕ ті імена таблиць, які є в базі даних! "
+                               f"Якщо потрібно додати кілька рядків, використовуй окремі INSERT запити з крапкою з комою в кінці. "
+                               f"Враховуй права користувача на таблиці: {user_permissions}"
+                },
+                {
+                    "role": "user",
+                    "content": f"Ось структури таблиць: {schemas}. Доступні таблиці: {actual_table_names}. "
+                               f"Згенеруй ЛИШЕ SQL! без лапок, без маркерів коду і додаткових пояснень, враховуючи мої права: {query}"
+                }
+            ],
+            web_search=False
+        )
+        sql_code = response.choices[0].message.content
+        
+        # Очищення SQL коду від можливого форматування markdown
+        generated_sql = sql_code.strip()
+        generated_sql = generated_sql.replace("```sql", "").replace("```", "").strip()
+        
+        print("Generated SQL:", generated_sql)
+        
+        # Validate that the query only references existing tables
+        for table_name in actual_table_names:
+            # Replace any translation with the actual table name if needed
+            if "працівники" in generated_sql.lower() and "employees" in [t.lower() for t in actual_table_names]:
+                generated_sql = generated_sql.replace("працівники", "employees")
+        
+        return generated_sql
 
     # === DATA MODIFICATION ===
     def insert_row(self):
@@ -934,26 +788,13 @@ class SQLApp(QWidget):
         self.query_input.setText(item.text())
     
     def load_from_favorites(self, item):
-        """Load a query from favorites into the input field and execute it"""
-        display_text = item.text()
-        if display_text in self.favorites_data:
-            full_query = self.favorites_data[display_text]
-            self.query_input.setText(full_query)
-        else:
-            self.query_input.setText(display_text)
-        # Автоматично виконуємо запит
-        self.execute_query()
+        """Load a query from favorites into the input field"""
+        self.query_input.setText(item.text())
     
     def add_to_favorites(self):
         """Add current query to favorites"""
         query = self.query_input.text()
-        if not query:
-            return
-        
-        # Check if this exact query is already in favorites
-        if query in self.favorites_data.values():
-            from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.information(self, "Дублікат", "Цей запит вже закріплено")
+        if not query or query in self.favorites:
             return
             
         # Запит назви для закладки
@@ -963,12 +804,9 @@ class SQLApp(QWidget):
         if not ok:
             return
             
-        # Generate display text
+        # Додавання до локального UI
+        self.favorites.append(query)
         display_text = query_name if query_name else query[:50] + ("..." if len(query) > 50 else "")
-        
-        # Додавання до локального UI та даних
-        self.favorites.append(display_text)
-        self.favorites_data[display_text] = query  # Store the full query with display text as key
         self.favorites_list.addItem(display_text)
         
         # Збереження у базу даних
@@ -983,50 +821,6 @@ class SQLApp(QWidget):
             except Exception as e:
                 print(f"Помилка збереження закріпленого запиту: {e}")
 
-    def delete_favorite(self):
-        """Delete the selected favorite query"""
-        current_item = self.favorites_list.currentItem()
-        if not current_item:
-            from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "Видалення закладки", "Спочатку виберіть закладку для видалення")
-            return
-        
-        display_text = current_item.text()
-        
-        # Confirm deletion
-        from PyQt6.QtWidgets import QMessageBox
-        reply = QMessageBox.question(self, 'Підтвердження',
-                                    f'Ви впевнені, що хочете видалити закладку "{display_text}"?',
-                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, 
-                                    QMessageBox.StandardButton.No)
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            # Remove from UI
-            row = self.favorites_list.row(current_item)
-            self.favorites_list.takeItem(row)
-            
-            # Remove from local data
-            if display_text in self.favorites_data:
-                query = self.favorites_data[display_text]
-                if display_text in self.favorites:
-                    self.favorites.remove(display_text)
-                del self.favorites_data[display_text]
-                
-                # Remove from database
-                if self.user_id:
-                    try:
-                        conn = sqlite3.connect("user_management.db")
-                        cursor = conn.cursor()
-                        # Try to find by query_name or by query itself
-                        cursor.execute("DELETE FROM user_favorites WHERE user_id=? AND (query_name=? OR query=?)",
-                                     (self.user_id, display_text, query))
-                        conn.commit()
-                        conn.close()
-                        QMessageBox.information(self, "Видалення закладки", "Закладку успішно видалено")
-                    except Exception as e:
-                        print(f"Помилка видалення закладки: {e}")
-                        QMessageBox.warning(self, "Помилка", f"Не вдалося видалити закладку: {str(e)}")
-
     # === EXPORT AND SETTINGS ===
     def generate_pdf_filename(self, query):
         """Generate a PDF filename based on the query content using AI"""
@@ -1040,7 +834,7 @@ class SQLApp(QWidget):
             print("Генерую назву файлу за допомогою ШІ...")
             client = Client()
             response = client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4o-mini",
                 messages=[
                     {
                         "role": "system",
@@ -1081,277 +875,159 @@ class SQLApp(QWidget):
 
     def export_to_pdf(self):
         try:
-            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
             from reportlab.lib import colors
-            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-            from reportlab.lib.pagesizes import A4, landscape, portrait
-            from reportlab.lib.units import mm
+            from reportlab.lib.styles import getSampleStyleSheet
             from PyQt6.QtWidgets import QFileDialog, QMessageBox
             from datetime import datetime
-            from reportlab.pdfbase.ttfonts import TTFont
-            from reportlab.pdfbase import pdfmetrics
-
-            # Try to register Arial, fallback to Helvetica if not found
-            arial_path = "C:/Windows/Fonts/arial.ttf"
-            arial_bold_path = "C:/Windows/Fonts/arialbd.ttf"
-            try:
-                pdfmetrics.registerFont(TTFont("Arial", arial_path))
-                pdfmetrics.registerFont(TTFont("Arial-Bold", arial_bold_path))
-                font_name = "Arial"
-                font_bold = "Arial-Bold"
-            except Exception:
-                font_name = "Helvetica"
-                font_bold = "Helvetica-Bold"
-
+            
+            # Get the query from the input field
             query = self.query_input.text()
             if not query:
                 QMessageBox.warning(self, "PDF Export", "Немає даних для експорту!")
                 return
-
+            
+            # Generate a meaningful filename based on query
+            print("Запускаю генерацію імені файлу...")
             suggested_name = self.generate_pdf_filename(query)
+            print(f"Запропонована назва файлу: {suggested_name}")
+            
+            # Ensure pdf_export_path exists
             if not self.pdf_export_path or not os.path.exists(self.pdf_export_path):
                 self.pdf_export_path = os.path.expanduser("~/Documents")
+                print(f"Встановлено шлях за замовчуванням: {self.pdf_export_path}")
+            
+            # Get full path for suggested file
             suggested_path = os.path.join(self.pdf_export_path, suggested_name)
-
+            print(f"Пропонований повний шлях: {suggested_path}")
+            
+            # Open file dialog with the suggested name
             filename, _ = QFileDialog.getSaveFileName(
                 self,
                 "Зберегти як PDF",
                 suggested_path,
                 "PDF Files (*.pdf)"
             )
+            
             if not filename:
-                return
-
+                print("Користувач скасував операцію")
+                return  # User canceled the operation
+            
+            print(f"Користувач вибрав шлях: {filename}")
+                
+            # Update stored path
             new_path = os.path.dirname(filename)
+            print(f"Оновлюємо збережений шлях на: {new_path}")
             self.pdf_export_path = new_path
             self.save_user_preferences()
-
+            
+            # Create the PDF document with the generated filename
+            print(f"Створюємо PDF документ: {filename}")
+            doc = SimpleDocTemplate(filename)
+            elements = []
+            
+            # Add title with query
+            styles = getSampleStyleSheet()
+            elements.append(Paragraph(f"SQL запит: {query}", styles['Heading2']))
+            elements.append(Paragraph(f"Час створення: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}", styles['Normal']))
+            
+            # Get column headers
             col_count = self.table.columnCount()
-            row_count = self.table.rowCount()
             if col_count == 0:
                 QMessageBox.warning(self, "PDF Export", "Немає даних для експорту!")
                 return
-
+                
+            print(f"Знайдено {col_count} стовпців")
             headers = [self.table.horizontalHeaderItem(i).text() for i in range(col_count)]
+            
+            # Create data list starting with headers
             data = [headers]
+            
+            # Add table data rows
+            row_count = self.table.rowCount()
+            print(f"Знайдено {row_count} рядків")
+            
             for row in range(row_count):
                 row_data = []
                 for col in range(col_count):
                     item = self.table.item(row, col)
                     row_data.append(item.text() if item else "")
                 data.append(row_data)
-
-            # --- PDF page size/orientation logic ---
-            PAGE_MARGIN = 20 * mm
-            max_width = 160  # max width per column in points
-            # Estimate total table width
-            col_widths = []
-            for col in range(col_count):
-                maxlen = max([len(str(data[row][col])) for row in range(len(data))])
-                width = min(40 + maxlen * 6, max_width)
-                col_widths.append(width)
-            table_width = sum(col_widths)
-            # If table too wide for portrait, use landscape
-            if table_width > (A4[0] - 2 * PAGE_MARGIN):
-                pagesize = landscape(A4)
-                available_width = pagesize[0] - 2 * PAGE_MARGIN
-            else:
-                pagesize = portrait(A4)
-                available_width = pagesize[0] - 2 * PAGE_MARGIN
-            # Scale columns if needed
-            scale = min(1.0, available_width / table_width)
-            col_widths = [w * scale for w in col_widths]
-
-            doc = SimpleDocTemplate(filename, pagesize=pagesize, rightMargin=PAGE_MARGIN, leftMargin=PAGE_MARGIN, topMargin=PAGE_MARGIN, bottomMargin=PAGE_MARGIN)
-            elements = []
-
-            styles = getSampleStyleSheet()
-            styles.add(ParagraphStyle(name='QueryHeader', fontName=font_bold, fontSize=16, spaceAfter=10, textColor=colors.darkblue, alignment=1))
-            styles.add(ParagraphStyle(name='NormalCustom', fontName=font_name, fontSize=11, spaceAfter=8))
-
-            elements.append(Paragraph("Результати SQL-запиту", styles['QueryHeader']))
-            elements.append(Paragraph(f"<b>SQL запит:</b> {query}", styles['NormalCustom']))
-            elements.append(Paragraph(f"<b>Час створення:</b> {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}", styles['NormalCustom']))
-            elements.append(Spacer(1, 10))
-
-            pdf_table = Table(data, colWidths=col_widths, repeatRows=1)
+            
+            # Create the table
+            pdf_table = Table(data)
+            
+            # Add table style
             style = TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#1976d2")),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), font_bold),
-                ('FONTSIZE', (0, 0), (-1, 0), 11),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+                ('FONTNAME', (0, 0), (-1, 0), 'Arial'),
+                ('FONTSIZE', (0, 0), (-1, 0), 12),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
                 ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                ('FONTNAME', (0, 1), (-1, -1), font_name),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('FONTNAME', (0, 1), (-1, -1), 'Arial'),
                 ('FONTSIZE', (0, 1), (-1, -1), 10),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ])
             pdf_table.setStyle(style)
+            
+            # Add the table to our document
             elements.append(pdf_table)
+            
+            # Build the document
+            print("Створюємо PDF файл...")
             doc.build(elements)
+            print(f"PDF файл створено успішно: {filename}")
+            
+            # Show feedback to the user
             QMessageBox.information(self, "PDF Export", f"Файл успішно збережено як:\n{filename}")
         except Exception as e:
             print(f"Помилка при експорті в PDF: {e}")
-            from PyQt6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Помилка експорту", f"Не вдалося створити PDF файл.\nПомилка: {str(e)}")
 
-    def export_to_word(self):
-        from PyQt6.QtWidgets import QFileDialog, QMessageBox
-        from datetime import datetime
-        import docx
-        from docx.shared import RGBColor
-        
-        query = self.query_input.text()
-        if not query:
-            QMessageBox.warning(self, "Word Export", "Немає даних для експорту!")
-            return
-
-        suggested_name = self.generate_pdf_filename(query).replace('.pdf', '.docx')
-        if not self.pdf_export_path or not os.path.exists(self.pdf_export_path):
-            self.pdf_export_path = os.path.expanduser("~/Documents")
-        suggested_path = os.path.join(self.pdf_export_path, suggested_name)
-
-        filename, _ = QFileDialog.getSaveFileName(
-            self,
-            "Зберегти як Word",
-            suggested_path,
-            "Word Files (*.docx)"
-        )
-        if not filename:
-            return
-
+    def set_pdf_path(self):
+        """Дозволяє користувачу вибрати шлях для збереження PDF файлів"""
         try:
-            doc = Document()
-            doc.add_heading("Результати SQL-запиту", 0)
-            doc.add_paragraph(f"SQL запит: {query}")
-            doc.add_paragraph(f"Час створення: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}")
-            doc.add_paragraph("")  # Відступ
-
-            col_count = self.table.columnCount()
-            row_count = self.table.rowCount()
-            if col_count == 0:
-                QMessageBox.warning(self, "Word Export", "Немає даних для експорту!")
-                return
-
-            table = doc.add_table(rows=row_count + 1, cols=col_count)
-            table.style = 'Table Grid'
-
-            # Заголовки (без використання XML напряму)
-            hdr_cells = table.rows[0].cells
-            for i in range(col_count):
-                cell = hdr_cells[i]
-                cell.text = self.table.horizontalHeaderItem(i).text()
-                for paragraph in cell.paragraphs:
-                    paragraph.alignment = 1  # CENTER
-                    for run in paragraph.runs:
-                        run.font.bold = True
-                        run.font.size = Pt(11)
-
-            # Дані
-            for row in range(row_count):
-                row_cells = table.rows[row + 1].cells
-                for col in range(col_count):
-                    item = self.table.item(row, col)
-                    row_cells[col].text = item.text() if item else ""
-                    for p in row_cells[col].paragraphs:
-                        p.alignment = 1  # CENTER
-                        for run in p.runs:
-                            run.font.size = Pt(10)
-
-            doc.save(filename)
-            QMessageBox.information(self, "Word Export", f"Файл успішно збережено як:\n{filename}")
+            directory = QFileDialog.getExistingDirectory(
+                self, 
+                "Виберіть папку для збереження PDF файлів",
+                self.pdf_export_path or os.path.expanduser("~/Documents")
+            )
             
+            if (directory):
+                self.pdf_export_path = directory
+                self.save_user_preferences()
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.information(
+                    self, 
+                    "Шлях збереження PDF", 
+                    f"PDF файли будуть зберігатися у:\n{directory}"
+                )
         except Exception as e:
-            import traceback
-            traceback.print_exc()
-            QMessageBox.critical(self, "Помилка експорту", f"Не вдалося створити Word файл.\nПомилка: {str(e)}")
+            print(f"Помилка при встановленні шляху для PDF: {e}")
 
-    def export_to_excel(self):
-        from PyQt6.QtWidgets import QFileDialog, QMessageBox
-        from datetime import datetime
-        from openpyxl.styles import PatternFill
-
-        query = self.query_input.text()
-        if not query:
-            QMessageBox.warning(self, "Excel Export", "Немає даних для експорту!")
-            return
-
-        suggested_name = self.generate_pdf_filename(query).replace('.pdf', '.xlsx')
-        if not self.pdf_export_path or not os.path.exists(self.pdf_export_path):
-            self.pdf_export_path = os.path.expanduser("~/Documents")
-        suggested_path = os.path.join(self.pdf_export_path, suggested_name)
-
-        filename, _ = QFileDialog.getSaveFileName(
-            self,
-            "Зберегти як Excel",
-            suggested_path,
-            "Excel Files (*.xlsx)"
-        )
-        if not filename:
-            return
-
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "SQL Results"
-
-        col_count = self.table.columnCount()
-        row_count = self.table.rowCount()
-        if col_count == 0:
-            QMessageBox.warning(self, "Excel Export", "Немає даних для експорту!")
-            return
-
-        # Заголовки
-        headers = [self.table.horizontalHeaderItem(i).text() for i in range(col_count)]
-        ws.append(headers)
-        header_fill = PatternFill(start_color="1976d2", end_color="1976d2", fill_type="solid")
-        for cell in ws[1]:
-            cell.font = Font(bold=True, color="FFFFFF")
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-            cell.fill = header_fill
-
-        # Дані
-        for row in range(row_count):
-            row_data = []
-            for col in range(col_count):
-                item = self.table.item(row, col)
-                row_data.append(item.text() if item else "")
-            ws.append(row_data)
-
-        # Автоширина колонок
-        for col in ws.columns:
-            max_length = 0
-            col_letter = col[0].column_letter
-            for cell in col:
-                try:
-                    if len(str(cell.value)) > max_length:
-                        max_length = len(str(cell.value))
-                except Exception:
-                    pass
-            ws.column_dimensions[col_letter].width = max(10, min(max_length + 2, 40))
-
-        try:
-            wb.save(filename)
-            QMessageBox.information(self, "Excel Export", f"Файл успішно збережено як:\n{filename}")
-        except Exception as e:
-            QMessageBox.critical(self, "Помилка експорту", f"Не вдалося створити Excel файл.\nПомилка: {str(e)}")
-
-# === Add these debug functions at the bottom of the file, before the if __name__ == "__main__": block ===
-def debug_print(message):
-    """Helper function to print debugging messages with timestamps"""
-    from datetime import datetime
-    timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-    print(f"[DEBUG {timestamp}] {message}")
+    def toggle_row_numbers(self, state):
+        """Показує або приховує номери рядків у таблиці"""
+        # Оновлюємо відображення таблиці, якщо дані вже завантажені
+        if self.table.rowCount() > 0:
+            if state == Qt.CheckState.Checked:
+                # Встановлюємо номери рядків
+                self.table.setVerticalHeaderLabels([str(i+1) for i in range(self.table.rowCount())])
+            else:
+                # Встановлюємо пусті мітки
+                self.table.setVerticalHeaderLabels([""] * self.table.rowCount())
 
 def initialize_database():
-    """Initialize necessary databases for the application"""
-    # Create user_management.db for authentication
+    """Ініціалізувати базу даних з адміністратором"""
     try:
-        conn = sqlite3.connect("user_management.db")
+        # Перевірити наявність бази даних
+        db_file = "user_management.db"
+        
+        conn = sqlite3.connect(db_file)
         cursor = conn.cursor()
         
-        # Create users table if it doesn't exist
+        # Створити таблицю користувачів
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1360,89 +1036,35 @@ def initialize_database():
             role TEXT DEFAULT 'user'
         )''')
         
-        # Create default admin user if no users exist
-        cursor.execute("SELECT COUNT(*) FROM users")
-        if cursor.fetchone()[0] == 0:
+        # Перевірити наявність адміністратора
+        cursor.execute("SELECT COUNT(*) FROM users WHERE role='admin'")
+        admin_count = cursor.fetchone()[0]
+        
+        # Якщо адміністраторів немає - створити стандартного
+        if (admin_count == 0):
             cursor.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", 
                           ("admin", "admin123", "admin"))
-        
-        # Create user_preferences table
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS user_preferences (
-            user_id INTEGER PRIMARY KEY,
-            last_db_path TEXT,
-            pdf_export_path TEXT,
-            FOREIGN KEY (user_id) REFERENCES users(user_id)
-        )''')
-        
-        # Create user_permissions table
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS user_permissions (
-            permission_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            table_name TEXT NOT NULL,
-            can_select BOOLEAN DEFAULT 1,
-            can_insert BOOLEAN DEFAULT 0,
-            can_update BOOLEAN DEFAULT 0,
-            can_delete BOOLEAN DEFAULT 0,
-            FOREIGN KEY (user_id) REFERENCES users(user_id)
-        )''')
-        
-        # Create user_favorites table
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS user_favorites (
-            favorite_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            query TEXT NOT NULL,
-            query_name TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(user_id)
-        )''')
-        
+            print("Створено стандартного адміністратора: логін = admin, пароль = admin123")
+            
         conn.commit()
         conn.close()
-        debug_print("User management database initialized successfully")
-        
-        # Ensure project_management.db exists (create an empty one if not present)
-        project_db_path = os.path.join(os.path.dirname(__file__), "project_management.db")
-        if not os.path.exists(project_db_path):
-            conn = sqlite3.connect(project_db_path)
-            conn.close()
-            debug_print(f"Created empty project database at {project_db_path}")
-            
+        print("База даних ініціалізована успішно")
+        return True
     except Exception as e:
-        debug_print(f"Error initializing database: {e}")
-        raise
+        print(f"Помилка ініціалізації бази даних: {e}")
+        return False
 
-# Update the main execution block with debug statements
+# Викликати функцію ініціалізації перед запуском програми
 if __name__ == "__main__":
-    try:
-        debug_print("Starting application")
-        app = QApplication(sys.argv)
-        
-        debug_print("Initializing database")
-        initialize_database()
-        
-        debug_print("Creating login dialog")
-        login_dialog = LoginDialog()
-        debug_print("Showing login dialog")
-        result = login_dialog.exec()
-        debug_print(f"Login dialog result: {result}")
-        
-        if result == QDialog.DialogCode.Accepted:
-            debug_print("Login successful, creating main window")
-            window = SQLApp(login_dialog.user_id, login_dialog.user_role)
-            debug_print("Showing main window")
-            window.show()
-            debug_print("Starting event loop")
-            sys.exit(app.exec())
-        else:
-            debug_print("Login canceled or failed")
-            sys.exit(0)
-    except Exception as e:
-        print(f"ERROR: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
-
-
+    app = QApplication(sys.argv)
+    
+    # Ініціалізувати базу даних перед відображенням діалогу входу
+    initialize_database()
+    
+    # Відображаємо діалог входу
+    login_dialog = LoginDialog()
+    if login_dialog.exec() == QDialog.DialogCode.Accepted:
+        # Якщо вхід успішний, відображаємо головне вікно
+        window = SQLApp(login_dialog.user_id, login_dialog.user_role)
+        window.show()
+        sys.exit(app.exec())
