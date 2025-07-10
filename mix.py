@@ -51,7 +51,7 @@ class LoginDialog(QDialog):
         layout.addWidget(self.pass_label)
         layout.addWidget(self.pass_input)
 
-        # Кнопка для входу
+        # Кнопка для входу 
         self.login_button = QPushButton("Увійти")
         self.login_button.clicked.connect(self.attempt_login)
         layout.addWidget(self.login_button)
